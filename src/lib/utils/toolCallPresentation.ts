@@ -638,7 +638,7 @@ export const TOOL_COMBINATION_RULES: ToolCombinationRule[] = [
 		pendingPrefix: 'Remembering and Writing Note',
 		donePrefix: 'Remembered and Wrote Note',
 		match: {
-			onlyOf: ['write_memory', 'write_note']
+			onlyOf: ['add_memory', 'write_note']
 		}
 	}
 ];

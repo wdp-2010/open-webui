@@ -1189,7 +1189,7 @@
 				<div class="my-2" id={`${componentId}-tool-call-embed-${idx}`}>
 					<FullHeightIframe
 						src={embed}
-						args={null}
+						{args}
 						allowScripts={true}
 						allowForms={$settings?.iframeSandboxAllowForms ?? false}
 						allowSameOrigin={$settings?.iframeSandboxAllowSameOrigin ?? false}

@@ -467,7 +467,7 @@
 			<div id={`${id}-embed-${idx}`}>
 				<FullHeightIframe
 					src={getEmbedSrc(embedItem)}
-					args={null}
+					args={embedItem.args}
 					allowScripts={true}
 					allowForms={$settings?.iframeSandboxAllowForms ?? false}
 					allowSameOrigin={$settings?.iframeSandboxAllowSameOrigin ?? false}
