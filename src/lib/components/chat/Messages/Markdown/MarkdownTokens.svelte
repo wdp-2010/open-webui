@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { decode } from 'html-entities';
-	import { onMount, getContext } from 'svelte';
-	const i18n = getContext('i18n');
+	import { getContext } from 'svelte';
+	import type { Readable } from 'svelte/store';
+	const i18n = getContext<Readable<{ t: (key: string, params?: Record<string, unknown>) => string }>>('i18n');
 
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
@@ -20,6 +21,7 @@
 	import ToolCallDisplay from '$lib/components/common/ToolCallDisplay.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Download from '$lib/components/icons/Download.svelte';
+	import CheckCircle from '$lib/components/icons/CheckCircle.svelte';
 	import ConsecutiveDetailsGroup from './ConsecutiveDetailsGroup.svelte';
 
 	import HtmlToken from './HTMLToken.svelte';
@@ -30,7 +32,7 @@
 	export let tokens: Token[];
 	export let top = true;
 	export let attributes = {};
-	export let sourceIds = [];
+	export let sourceIds: string[] = [];
 
 	export let done = true;
 
@@ -53,21 +55,24 @@
 		return 'h' + depth;
 	};
 
-	const GROUPABLE_DETAIL_TYPES = new Set(['tool_calls', 'reasoning', 'code_interpreter']);
+	const GROUPABLE_DETAIL_TYPES = new Set(['tool_calls']);
+	type DetailGroupItem = Token & { attributes?: { type?: string; done?: string }; text?: string };
+	type DetailGroupToken = { type: 'detail_group'; items: DetailGroupItem[]; groupClosed: boolean };
 
 	const isGroupableDetailToken = (token: Token & { attributes?: { type?: string } }) => {
 		return token?.type === 'details' && GROUPABLE_DETAIL_TYPES.has(token?.attributes?.type ?? '');
 	};
 
 	const getDisplayTokens = (tokenList: Token[] = []) => {
-		const displayTokens = [];
-		let detailGroup = [];
+		const displayTokens: Array<Token | DetailGroupToken> = [];
+		let detailGroup: DetailGroupItem[] = [];
 
-		const flushDetailGroup = () => {
+		const flushDetailGroup = (groupClosed: boolean) => {
 			if (detailGroup.length > 1) {
 				displayTokens.push({
 					type: 'detail_group',
-					items: [...detailGroup]
+					items: [...detailGroup],
+					groupClosed
 				});
 			} else if (detailGroup.length === 1) {
 				displayTokens.push(detailGroup[0]);
@@ -80,17 +85,44 @@
 			if (isGroupableDetailToken(token)) {
 				detailGroup.push(token);
 			} else {
-				flushDetailGroup();
+				flushDetailGroup(true);
 				displayTokens.push(token);
 			}
 		}
 
-		flushDetailGroup();
+		flushDetailGroup(false);
 
 		return displayTokens;
 	};
 
-	const getDetailTextContent = (token) => {
+	const hasLaterToolCall = (items: DetailGroupItem[], index: number): boolean => {
+		for (let i = index + 1; i < items.length; i += 1) {
+			if (items[i]?.attributes?.type === 'tool_calls') {
+				return true;
+			}
+		}
+
+		return false;
+	};
+
+	const getNormalizedGroupedToolDone = (
+		items: DetailGroupItem[],
+		index: number,
+		rawDone: string | undefined,
+		groupClosed: boolean
+	): string => {
+		if (rawDone === 'true') {
+			return 'true';
+		}
+
+		if (hasLaterToolCall(items, index) || groupClosed) {
+			return 'true';
+		}
+
+		return rawDone ?? 'false';
+	};
+
+	const getDetailTextContent = (token: DetailGroupItem): string => {
 		return decode(token?.text || '')
 			.replace(/<summary>.*?<\/summary>/gi, '')
 			.trim();
@@ -370,20 +402,33 @@
 		<ConsecutiveDetailsGroup
 			id={`${id}-${tokenIdx}-detail-group`}
 			tokens={token.items}
+			groupClosed={token.groupClosed === true}
 			messageDone={done}
 		>
-			<div slot="content" class="space-y-1">
+			<div slot="content" class="space-y-0.5">
 				{#each token.items as detailToken, detailIdx}
 					{@const textContent = getDetailTextContent(detailToken)}
 
 					{#if detailToken?.attributes?.type === 'tool_calls'}
+						{@const toolDone = getNormalizedGroupedToolDone(
+							token.items,
+							detailIdx,
+							detailToken?.attributes?.done,
+							token.groupClosed === true
+						)}
 						<ToolCallDisplay
 							id={`${id}-${tokenIdx}-${detailIdx}-tc`}
-							attributes={detailToken.attributes}
+							attributes={{ ...detailToken.attributes, done: toolDone }}
 							grouped={true}
-							open={$settings?.expandDetails ?? false}
-							className="w-full space-y-1"
+							open={false}
+							className="w-full"
 						/>
+
+						{#if hasLaterToolCall(token.items, detailIdx) || (token.groupClosed === true && detailIdx === token.items.length - 1)}
+							<div class="ml-[26px] -mt-0.5 -mb-px h-2 flex items-center">
+								<div class="w-px h-full bg-gray-200 dark:bg-gray-800"></div>
+							</div>
+						{/if}
 					{:else if textContent.length > 0}
 						<Collapsible
 							title={detailToken.summary}
@@ -418,6 +463,15 @@
 						/>
 					{/if}
 				{/each}
+
+				{#if token.groupClosed === true}
+					<div class="ml-[18px] flex items-center gap-1.5 py-0.5 text-gray-600 dark:text-gray-300">
+						<div class="shrink-0 text-gray-400 dark:text-gray-500">
+							<CheckCircle className="size-4" strokeWidth="2" />
+						</div>
+						<div>{$i18n.t('Done')}</div>
+					</div>
+				{/if}
 			</div>
 		</ConsecutiveDetailsGroup>
 	{:else if token.type === 'details'}
@@ -428,7 +482,7 @@
 			<ToolCallDisplay
 				id={`${id}-${tokenIdx}-tc`}
 				attributes={token.attributes}
-				open={$settings?.expandDetails ?? false}
+				open={false}
 				className="w-full space-y-1"
 			/>
 		{:else if textContent.length > 0}
@@ -547,7 +601,7 @@
 			{onSourceClick}
 		/>
 	{:else if token.type === 'space'}
-		<div class="my-2" />
+		<div class="my-2"></div>
 	{:else}
 		{console.log('Unknown token', token)}
 	{/if}
